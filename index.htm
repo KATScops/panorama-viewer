@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Panorama Viewer – Index</title>
+  <style>
+    :root{color-scheme:light dark}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:#0b0b0b;color:#eee}
+    header{padding:18px 20px;border-bottom:1px solid #222;background:#0f0f0f}
+    h1{margin:0;font-size:18px}
+    main{max-width:920px;margin:24px auto;padding:0 16px}
+    .toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+    input[type="search"]{flex:1;min-width:220px;padding:10px;border-radius:10px;border:1px solid #2a2a2a;background:#121212;color:#eee}
+    select{padding:10px;border-radius:10px;border:1px solid #2a2a2a;background:#121212;color:#eee}
+    ul{list-style:none;padding:0;margin:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px}
+    li{border:1px solid #242424;border-radius:12px;background:#121212;padding:14px}
+    a.item{display:block;color:#fff;text-decoration:none}
+    .name{font-weight:600;margin-bottom:6px;word-break:break-all}
+    .meta{opacity:.8;font-size:12px;line-height:1.4}
+    .empty{opacity:.8;padding:24px 0}
+    footer{opacity:.7;text-align:center;padding:18px 0;font-size:12px}
+  </style>
+</head>
+<body>
+  <header><h1>Panorama Viewer – 파일 목록</h1></header>
+  <main>
+    <div class="toolbar">
+      <input id="q" type="search" placeholder="파일명 검색 (예: KOR, ENG, viewer…)"/>
+      <select id="sort">
+        <option value="name_asc">이름 오름차순</option>
+        <option value="name_desc">이름 내림차순</option>
+        <option value="date_desc" selected>최근 변경 순</option>
+        <option value="date_asc">오래된 순</option>
+      </select>
+    </div>
+    <ul id="list"><li class="empty">목록을 불러오는 중…</li></ul>
+    <footer>자동 생성 인덱스 • GitHub API 비로그인 60 요청/시간 제한</footer>
+  </main>
+
+  <script>
+  (async function () {
+    // ▶ 사용자/저장소/브랜치 설정 (필요시 수정)
+    const OWNER  = "KATSops";
+    const REPO   = "panorama-viewer";
+    const BRANCH = "main";
+    const PATH   = ""; // 서브폴더가 있으면 "public" 같은 경로로 설정
+
+    // GitHub API: 저장소 경로의 파일 목록
+    const API_LIST = `https://api.github.com/repos/${OWNER}/${REPO}/contents/${PATH}?ref=${BRANCH}`;
+
+    const $list = document.getElementById("list");
+    const $q = document.getElementById("q");
+    const $sort = document.getElementById("sort");
+
+    // 헬퍼: 저장소 파일의 실제 GitHub Pages URL로 변환
+    const toPagesUrl = (name) =>
+      `https://${OWNER}.github.io/${REPO}/${PATH ? PATH + "/" : ""}${name}`;
+
+    // 헬퍼: 최신 커밋 날짜 조회 (각 파일당 1회 호출)
+    async function fetchLastCommitDate(path) {
+      const u = `https://api.github.com/repos/${OWNER}/${REPO}/commits?path=${encodeURIComponent(path)}&per_page=1&sha=${BRANCH}`;
+      try {
+        const r = await fetch(u);
+        if (!r.ok) return null;
+        const arr = await r.json();
+        return arr?.[0]?.commit?.committer?.date ?? null;
+      } catch { return null; }
+    }
+
+    function render(items){
+      if (!items.length) {
+        $list.innerHTML = `<li class="empty">표시할 항목이 없습니다.</li>`;
+        return;
+      }
+      $list.innerHTML = items.map(it => `
+        <li>
+          <a class="item" href="${toPagesUrl(it.name)}" target="_blank" rel="noopener">
+            <div class="name">${it.name}</div>
+            <div class="meta">
+              ${it.date ? `업데이트: ${new Date(it.date).toLocaleString()}` : ""}
+              ${it.size ? ` · 크기: ${(it.size/1024).toFixed(1)} KB` : ""}
+            </div>
+          </a>
+        </li>
+      `).join("");
+    }
+
+    // 1) 파일 목록 가져오기
+    let raw;
+    try {
+      const res = await fetch(API_LIST);
+      if (!res.ok) throw new Error("목록 조회 실패");
+      raw = await res.json();
+    } catch (e) {
+      $list.innerHTML = `<li class="empty">목록을 가져오지 못했습니다. 잠시 후 다시 시도하세요.</li>`;
+      console.error(e);
+      return;
+    }
+
+    // 2) .html/.htm만 필터, index 제외
+    let items = raw
+      .filter(x => x.type === "file")
+      .filter(x => /\.(html?|HTML?)$/.test(x.name))
+      .filter(x => !/^index\.html?$/i.test(x.name))
+      .map(x => ({ name: x.name, path: x.path, size: x.size }));
+
+    // 3) 최근 변경일(커밋 날짜) 병합 (요청 수 줄이려면 필요한 개수만)
+    //    파일 수가 많다면 이 부분은 생략하거나 상위 N개만 조회하세요.
+    await Promise.all(items.map(async (it) => {
+      it.date = await fetchLastCommitDate(it.path);
+    }));
+
+    // 기본 정렬: 최근 업데이트 순
+    const sortFns = {
+      "name_asc":  (a,b)=> a.name.localeCompare(b.name),
+      "name_desc": (a,b)=> b.name.localeCompare(a.name),
+      "date_desc": (a,b)=> new Date(b.date||0)-new Date(a.date||0),
+      "date_asc":  (a,b)=> new Date(a.date||0)-new Date(b.date||0),
+    };
+    items.sort(sortFns["date_desc"]);
+    render(items);
+
+    // 검색/정렬 동작
+    function apply(){
+      const q = ($q.value||"").trim().toLowerCase();
+      const s = $sort.value;
+      const filt = items.filter(it => it.name.toLowerCase().includes(q));
+      filt.sort(sortFns[s]);
+      render(filt);
+    }
+    $q.addEventListener("input", apply);
+    $sort.addEventListener("change", apply);
+  })();
+  </script>
+</body>
+</html>
