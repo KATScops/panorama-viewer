@@ -2,7 +2,8 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+
   <title>360 이미지 뷰어 & 에디터 (v8.6 - 다크모드 전용)</title>
 
   <style>
@@ -226,10 +227,57 @@
     @supports (padding: max(0px)) {
       .controls { top: max(16px, env(safe-area-inset-top)); right: max(16px, env(safe-area-inset-right)); }
     }
+
+	/* === 모바일 세로모드 대응 === */
+	@media (orientation: portrait) {
+	  .controls {
+		top: auto;
+		bottom: 16px;
+		right: 50%;
+		transform: translateX(50%);
+		flex-wrap: nowrap;
+		justify-content: center;
+		background: rgba(0,0,0,0.55);
+		padding: 10px 12px;
+		gap: 6px;
+	  }
+
+	  #editPanel, #settingsPanel {
+		top: auto;
+		bottom: 70px;
+		right: 50%;
+		transform: translateX(50%);
+		width: 90%;
+	  }
+
+	  .overlay {
+		top: 8px;
+		left: 50%;
+		transform: translateX(-50%);
+		font-size: 12px;
+		text-align: center;
+		width: 90%;
+	  }
+
+	  #dropHint {
+		font-size: 12px;
+		bottom: 10%;
+		width: 80%;
+	  }
+	}
+
+
+
   </style>
 </head>
 
 <body>
+<ins class="adsbygoogle"
+     style="display:inline-block;width:100%;height:120px"
+     data-ad-client="ca-pub-2104385175608653"
+     data-ad-slot="3027520649"></ins>
+
+
   <!-- ===============================
        [메인 레이아웃]
        =============================== -->
@@ -283,9 +331,6 @@
         <label for="contrast" id="tCont">대비</label>
         <input type="range" id="contrast" min="-100" max="100" value="0" step="1">
         <input type="number" id="contrastValue" min="-100" max="100" value="0" step="1">
-      </div>
-      <div class="row">
-        <button id="resetFiltersBtn">필터 초기화</button>
       </div>
     </div>
 
@@ -425,7 +470,6 @@
       tAutoRotate.textContent = t.auto;
       tInvert.textContent = t.invert;
       tGyro.textContent = t.gyro;
-      resetFiltersBtn.textContent = t.filters;
       tBright.textContent = t.bright;
       tSat.textContent = t.sat;
       tCont.textContent = t.cont;
@@ -477,7 +521,6 @@
     const optTitle = byId('optTitle');
     const ovTitle = byId('ovTitle');
     const ovHint = byId('ovHint');
-    const resetFiltersBtn = byId('resetFiltersBtn');
     const tAutoRotate = byId('tAutoRotate');
     const tInvert = byId('tInvert');
     const tGyro = byId('tGyro');
