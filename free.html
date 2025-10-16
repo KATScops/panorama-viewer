@@ -1,0 +1,909 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+
+  <title>360 이미지 뷰어 & 에디터 (v8.6 - 다크모드 전용)</title>
+
+  <style>
+    /* ===============================
+       [스타일 기본 설정]
+       - 전체 UI는 다크모드 기준으로 제작
+       - 색상 변수들은 명확한 대비로 설정
+       =============================== */
+    :root {
+      --bg:#000; /* 전체 배경색 */
+      --fg:#eee; /* 기본 글자색 */
+      --glass:rgba(0,0,0,0.35); /* 반투명 유리 배경 */
+      --panel:rgba(0,0,0,0.72); /* 패널 배경 */
+      --btn:rgba(255,255,255,0.10); /* 버튼 배경 */
+      --btn-bd:rgba(255,255,255,0.22); /* 버튼 테두리 */
+      --select-bg:rgba(0,0,0,0.92); /* 언어 선택 배경 */
+      --select-fg:#fff; /* 언어 선택 글자색 */
+      --panel-bd:rgba(255,255,255,0.18); /* 패널 테두리 */
+    }
+
+    html, body {
+      height:100%;
+      margin:0;
+      background:var(--bg);
+      color:var(--fg);
+      font-family: Inter, Arial, sans-serif;
+    }
+
+    /* 메인 컨테이너 (3D 캔버스 포함) */
+    #container {
+      position:relative;
+      width:100%;
+      height:100%;
+      overflow:hidden;
+      background:var(--bg);
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+
+    canvas {
+      display:block;
+      width:100%;
+      height:100%;
+      cursor: grab;
+      background:var(--bg);
+    }
+
+    /* 상단 왼쪽 안내 오버레이 */
+    .overlay {
+      position:absolute;
+      top:12px;
+      left:12px;
+      padding:10px 12px;
+      background:var(--glass);
+      border-radius:10px;
+      font-size:13px;
+      line-height:1.3;
+      color:var(--fg);
+      backdrop-filter:blur(5px);
+      user-select:none;
+      box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+      z-index:25;
+      border:1px solid var(--panel-bd);
+    }
+
+    /* 상단 오른쪽 버튼 묶음 */
+    .controls {
+      position:absolute;
+      right:16px;
+      top:16px;
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+      padding:8px;
+      border-radius:12px;
+      background:var(--glass);
+      backdrop-filter: blur(8px);
+      box-shadow:0 6px 18px rgba(0,0,0,0.25);
+      z-index:20;
+      align-items:center;
+      border:1px solid var(--panel-bd);
+    }
+
+    button {
+      background:var(--btn);
+      border:1px solid var(--btn-bd);
+      color:var(--fg);
+      padding:9px 12px;
+      border-radius:12px;
+      cursor:pointer;
+      font-size:13px;
+      font-weight:700;
+      line-height:1;
+      box-shadow:0 2px 10px rgba(0,0,0,0.15);
+    }
+
+    button:hover { filter:brightness(1.05); transform: translateY(-1px); }
+    #settingsBtn { font-size:18px; padding:10px 14px; border-radius:14px; }
+
+    /* 드래그 드롭 힌트 */
+    #dropHint {
+      position:absolute;
+      left:50%;
+      transform:translateX(-50%);
+      padding:8px 12px;
+      background:var(--glass);
+      border-radius:10px;
+      font-size:13px;
+      color:var(--fg);
+      user-select:none;
+      box-shadow:0 6px 18px rgba(0,0,0,0.25);
+      z-index:25;
+      border:1px solid var(--panel-bd);
+    }
+
+    .drop-active { outline:3px dashed rgba(255,255,255,0.45); outline-offset:-8px; }
+
+    .small { font-size:12px; opacity:0.96; text-shadow: 0 1px 1px rgba(0,0,0,0.22); }
+
+    /* 로딩 및 저장 진행바 */
+    #progressWrapper {
+      position:absolute;
+      top:50%;
+      left:50%;
+      transform:translate(-50%,-50%);
+      width:320px;
+      height:22px;
+      background:rgba(255,255,255,0.08);
+      border-radius:12px;
+      overflow:hidden;
+      display:none;
+      z-index:25;
+      border:1px solid var(--panel-bd);
+    }
+    #progressBar { height:100%; width:0%; background:linear-gradient(90deg,#4db8ff,#0077ff); transition:width 0.2s ease; }
+    #progressText { position:absolute; top:0; left:0; width:100%; text-align:center; line-height:22px; font-size:12px; color:#fff; text-shadow:0 0 4px rgba(0,0,0,.6); }
+
+    /* 저장 진행바 */
+    #saveProgress {
+      position:absolute;
+      bottom:20px;
+      left:50%;
+      transform:translateX(-50%);
+      width:360px;
+      background:var(--panel);
+      border-radius:10px;
+      padding:10px;
+      display:none;
+      z-index:40;
+      box-shadow:0 10px 24px rgba(0,0,0,0.35);
+      border:1px solid var(--panel-bd);
+    }
+    #saveProgress .label { font-size:12px; margin-bottom:6px; }
+    #saveProgress .bar { width:100%; height:10px; background:rgba(255,255,255,0.1); border-radius:8px; overflow:hidden; }
+    #saveProgress .bar > div { height:100%; width:0%; background:linear-gradient(90deg,#00bfff,#0077ff); transition:width .15s linear; }
+
+    /* 편집 패널 */
+    #editPanel {
+      position:absolute;
+      top:60px;
+      right:12px;
+      background:var(--panel);
+      border-radius:10px;
+      padding:12px;
+      backdrop-filter:blur(8px);
+      display:none;
+      flex-direction:column;
+      gap:10px;
+      width:280px;
+      z-index:30;
+      box-shadow:0 10px 24px rgba(0,0,0,.35);
+      border:1px solid var(--panel-bd);
+    }
+    .edit-control { display:grid; grid-template-columns: 90px 1fr 46px; align-items:center; gap:8px; }
+    .edit-control input[type="range"] { width:100%; }
+    .edit-control input[type="number"] {
+      width:46px;
+      background:var(--btn);
+      border:1px solid var(--btn-bd);
+      color:var(--fg);
+      border-radius:6px;
+      padding:4px;
+      font-size:12px;
+      text-align:center;
+      -moz-appearance:textfield;
+    }
+
+    /* 설정 패널 */
+    #settingsPanel {
+      position:absolute;
+      top:60px;
+      right:12px;
+      background:var(--panel);
+      border-radius:10px;
+      padding:12px;
+      backdrop-filter:blur(10px);
+      display:none;
+      width:300px;
+      z-index:35;
+      box-shadow:0 10px 24px rgba(0,0,0,.35);
+      border:1px solid var(--panel-bd);
+    }
+    #settingsPanel h4 { margin:0 0 8px 0; font-size:13px; }
+    .opt { display:flex; align-items:center; justify-content:space-between; gap:8px; margin:8px 0; font-size:12px; }
+    .opt input { accent-color:#0077ff; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; }
+
+    /* 언어 선택 드롭다운 */
+    .select-wrap { display:flex; flex-direction:column; gap:6px; margin-top:6px; }
+    #langSelect {
+      background:var(--select-bg);
+      color:var(--select-fg);
+      border:1px solid var(--btn-bd);
+      border-radius:10px;
+      padding:8px 10px;
+      font-size:12px;
+    }
+    #langSelect option { background:var(--select-bg); color:var(--select-fg); }
+
+    @supports (padding: max(0px)) {
+      .controls { top: max(16px, env(safe-area-inset-top)); right: max(16px, env(safe-area-inset-right)); }
+    }
+
+	/* === 모바일 세로모드 대응 === */
+	@media (orientation: portrait) {
+	  .controls {
+		top: auto;
+		bottom: 16px;
+		right: 50%;
+		transform: translateX(50%);
+		flex-wrap: nowrap;
+		justify-content: center;
+		background: rgba(0,0,0,0.55);
+		padding: 10px 12px;
+		gap: 6px;
+	  }
+
+	  #editPanel, #settingsPanel {
+		top: auto;
+		bottom: 70px;
+		right: 50%;
+		transform: translateX(50%);
+		width: 90%;
+	  }
+
+	  .overlay {
+		top: 8px;
+		left: 50%;
+		transform: translateX(-50%);
+		font-size: 12px;
+		text-align: center;
+		width: 90%;
+	  }
+
+	  #dropHint {
+		font-size: 12px;
+		bottom: 10%;
+		width: 80%;
+	  }
+	}
+
+
+
+  </style>
+</head>
+
+<body>
+  <!-- ===============================
+       [메인 레이아웃]
+       =============================== -->
+  <div id="container" data-theme="dark"><!-- data-theme는 고정 -->
+    <!-- 화면 왼쪽 상단 설명 -->
+    <div class="overlay">
+      <div id="ovTitle">360 이미지 뷰어</div>
+      <div id="ovHint" class="small">마우스 드래그: 회전 • 휠: 줌 • 핀치: 줌</div>
+    </div>
+
+    <!-- 우측 상단 주요 버튼 -->
+    <div class="controls">
+      <button id="openFileBtn">열기</button>
+      <button id="editBtn">편집</button>
+      <button id="saveBtn">JPG 저장</button>
+      <button id="fullscreenBtn">전체화면</button>
+      <button id="resetBtn">리셋</button>
+      <button id="settingsBtn" title="설정">⚙︎</button>
+    </div>
+
+    <!-- 중앙 드롭 안내 -->
+    <div id="dropHint">360 JPG 이미지를 여기에 드래그하세요.</div>
+
+    <!-- 로딩 진행 표시 -->
+    <div id="progressWrapper">
+      <div id="progressBar"></div>
+      <div id="progressText">0%</div>
+    </div>
+
+    <!-- 저장 진행 표시 -->
+    <div id="saveProgress">
+      <div class="label" id="saveLabel">저장 중…</div>
+      <div class="bar"><div id="saveProgressBar"></div></div>
+    </div>
+
+    <!-- ===============================
+         [편집 패널] 밝기, 채도, 대비 조절
+         =============================== -->
+    <div id="editPanel">
+      <div class="edit-control">
+        <label for="brightness" id="tBright">밝기</label>
+        <input type="range" id="brightness" min="-100" max="100" value="0" step="1">
+        <input type="number" id="brightnessValue" min="-100" max="100" value="0" step="1">
+      </div>
+      <div class="edit-control">
+        <label for="saturation" id="tSat">채도</label>
+        <input type="range" id="saturation" min="-100" max="100" value="0" step="1">
+        <input type="number" id="saturationValue" min="-100" max="100" value="0" step="1">
+      </div>
+      <div class="edit-control">
+        <label for="contrast" id="tCont">대비</label>
+        <input type="range" id="contrast" min="-100" max="100" value="0" step="1">
+        <input type="number" id="contrastValue" min="-100" max="100" value="0" step="1">
+      </div>
+    </div>
+
+    <!-- ===============================
+         [설정 패널] (자동회전, 반전, 자이로, 언어)
+         =============================== -->
+    <div id="settingsPanel">
+      <h4 id="optTitle">옵션</h4>
+      <div class="opt"><span id="tAutoRotate">자동 회전</span><input type="checkbox" id="autoRotate" checked></div>
+      <div class="opt"><span id="tInvert">드래그 반전</span><input type="checkbox" id="invertDrag"></div>
+      <div class="opt"><span id="tGyro">자이로</span><input type="checkbox" id="gyroCtl"></div>
+      <div class="select-wrap">
+        <label for="langSelect" id="tLangLabel" style="font-size:12px;">언어</label>
+
+		<select id="langSelect" title="언어 선택">
+		  <option value="en">English</option>
+		  <option value="ko">한국어</option>
+		  <option value="zh">中文</option>
+		  <option value="ja">日本語</option>
+		  <option value="it">Italiano</option>
+		  <option value="de">Deutsch</option>
+		</select>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- 이후 스크립트 부분은 길어서 생략 -->
+  <!-- 필수 라이브러리: Three.js, EXIFReader -->
+  <script src="https://unpkg.com/three@0.152.2/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/exifreader@4.23.4/dist/exif-reader.min.js"></script>
+
+  <script>
+
+
+
+	/* ===========================================================
+	   [다국어(i18n) 설정]
+	   - 지원 언어: 영어, 한국어, 중국어, 일본어, 이탈리아어, 독일어
+	   =========================================================== */
+	const LANGS = {
+	  en:{
+		title:"360 Image Viewer & Editor",
+		ovTitle:"360 Image Viewer",
+		ovHint:"Left-drag: rotate • Wheel: zoom • Pinch: zoom",
+		open:"Open", edit:"Edit", full:"Full", reset:"Reset", save:"Save JPG",
+		auto:"Auto-rotate", invert:"Invert drag", gyro:"Gyro",
+		drop:"Drag & drop a 360 JPG here.",
+		saving:"Saving…", saved:"Saved", loadFirst:"Load an image first.",
+		noImage:"No 360 image to save.", filters:"Reset Filters",
+		bright:"Brightness", sat:"Saturation", cont:"Contrast",
+		opts:"Options", lang:"Language"
+	  },
+	  ko:{
+		title:"360 이미지 뷰어 & 에디터",
+		ovTitle:"360 이미지 뷰어",
+		ovHint:"마우스 드래그: 회전 • 휠: 줌 • 핀치: 줌",
+		open:"열기", edit:"편집", full:"전체화면", reset:"리셋", save:"JPG 저장",
+		auto:"자동 회전", invert:"드래그 반전", gyro:"자이로",
+		drop:"360 JPG 이미지를 여기에 드래그하세요.",
+		saving:"저장 중…", saved:"저장 완료", loadFirst:"먼저 이미지를 불러오세요.",
+		noImage:"저장할 360 이미지가 없습니다.", filters:"필터 초기화",
+		bright:"밝기", sat:"채도", cont:"대비",
+		opts:"옵션", lang:"언어"
+	  },
+	  zh:{
+		title:"360°图像查看与编辑",
+		ovTitle:"360°图像查看器",
+		ovHint:"左键拖动: 旋转 • 滚轮: 缩放 • 双指: 缩放",
+		open:"打开", edit:"编辑", full:"全屏", reset:"重置", save:"保存 JPG",
+		auto:"自动旋转", invert:"反向拖拽", gyro:"陀螺仪",
+		drop:"将 360 JPG 拖到此处。",
+		saving:"正在保存…", saved:"已保存", loadFirst:"请先加载图片。",
+		noImage:"没有可保存的360图像。", filters:"重置滤镜",
+		bright:"亮度", sat:"饱和度", cont:"对比度",
+		opts:"选项", lang:"语言"
+	  },
+	  ja:{
+		title:"360 画像ビューア＆エディタ",
+		ovTitle:"360 画像ビューア",
+		ovHint:"左ドラッグ: 回転 • ホイール: ズーム • ピンチ: ズーム",
+		open:"開く", edit:"編集", full:"全画面", reset:"リセット", save:"JPG 保存",
+		auto:"自動回転", invert:"ドラッグ反転", gyro:"ジャイロ",
+		drop:"ここに360 JPGをドラッグ。",
+		saving:"保存中…", saved:"保存完了", loadFirst:"先に画像を読み込んでください。",
+		noImage:"保存する360画像がありません。", filters:"フィルター初期化",
+		bright:"明るさ", sat:"彩度", cont:"コントラスト",
+		opts:"オプション", lang:"言語"
+	  },
+	  it:{
+		title:"Visualizzatore ed Editor 360",
+		ovTitle:"Visualizzatore 360",
+		ovHint:"Trascina sinistra: ruota • Rotella: zoom • Pizzica: zoom",
+		open:"Apri", edit:"Modifica", full:"Schermo", reset:"Reset", save:"Salva JPG",
+		auto:"Rotazione automatica", invert:"Trascinamento invertito", gyro:"Giroscopio",
+		drop:"Trascina qui un JPG 360.",
+		saving:"Salvataggio…", saved:"Salvato", loadFirst:"Carica prima un'immagine.",
+		noImage:"Nessuna immagine 360 da salvare.", filters:"Reimposta filtri",
+		bright:"Luminosità", sat:"Saturazione", cont:"Contrasto",
+		opts:"Opzioni", lang:"Lingua"
+	  },
+	  de:{
+		title:"360 Bildbetrachter & Editor",
+		ovTitle:"360 Bildbetrachter",
+		ovHint:"Linke Maustaste: drehen • Rad: zoomen • Pinch: zoomen",
+		open:"Öffnen", edit:"Bearbeiten", full:"Vollbild", reset:"Zurücksetzen", save:"JPG speichern",
+		auto:"Auto-Rotation", invert:"Ziehen invertieren", gyro:"Gyroskop",
+		drop:"Ziehen Sie ein 360 JPG hierher.",
+		saving:"Speichern…", saved:"Gespeichert", loadFirst:"Laden Sie zuerst ein Bild.",
+		noImage:"Kein 360-Bild zum Speichern.", filters:"Filter zurücksetzen",
+		bright:"Helligkeit", sat:"Sättigung", cont:"Kontrast",
+		opts:"Optionen", lang:"Sprache"
+	  }
+	};
+
+
+
+
+
+
+    /* ===========================================================
+       [언어 적용 함수]
+       - 선택된 언어에 따라 UI 텍스트 변경
+       =========================================================== */
+    function applyI18n(lang){
+      const t = LANGS[lang] || LANGS.ko;
+      document.title = t.title;
+      ovTitle.textContent = t.ovTitle;
+      ovHint.textContent = t.ovHint;
+      openFileBtn.textContent = t.open;
+      editBtn.textContent = t.edit;
+      fullscreenBtn.textContent = t.full;
+      resetBtn.textContent = t.reset;
+      saveBtn.textContent = t.save;
+      saveLabel.textContent = t.saving;
+      optTitle.textContent = t.opts;
+      tAutoRotate.textContent = t.auto;
+      tInvert.textContent = t.invert;
+      tGyro.textContent = t.gyro;
+      tBright.textContent = t.bright;
+      tSat.textContent = t.sat;
+      tCont.textContent = t.cont;
+      dropHint.textContent = t.drop;
+      tLangLabel.textContent = t.lang;
+    }
+
+    /* 브라우저 언어 자동 감지 */
+    function guessLang(){
+      const stored = localStorage.getItem('viewerLang');
+      if(stored && LANGS[stored]) return stored;
+      const nav = (navigator.language||'ko').toLowerCase();
+      if(nav.startsWith('ko')) return 'ko';
+      return 'en';
+    }
+
+    /* ===========================================================
+       [DOM 요소 참조]
+       =========================================================== */
+    const container = byId('container');
+    const dropHint = byId('dropHint');
+    const openFileBtn = byId('openFileBtn');
+    const fullscreenBtn = byId('fullscreenBtn');
+    const resetBtn = byId('resetBtn');
+    const progressWrapper = byId('progressWrapper');
+    const progressBar = byId('progressBar');
+    const progressText = byId('progressText');
+    const editBtn = byId('editBtn');
+    const editPanel = byId('editPanel');
+    const saveBtn = byId('saveBtn');
+    const settingsBtn = byId('settingsBtn');
+    const settingsPanel = byId('settingsPanel');
+    const langSelect = byId('langSelect');
+
+    const brightnessSlider = byId('brightness');
+    const saturationSlider = byId('saturation');
+    const contrastSlider = byId('contrast');
+    const brightnessValue = byId('brightnessValue');
+    const saturationValue = byId('saturationValue');
+    const contrastValue = byId('contrastValue');
+
+    const autoRotateChk = byId('autoRotate');
+    const invertDragChk = byId('invertDrag');
+    const gyroCtlChk = byId('gyroCtl');
+
+    const saveProgress = byId('saveProgress');
+    const saveProgressBar = byId('saveProgressBar');
+    const saveLabel = byId('saveLabel');
+    const optTitle = byId('optTitle');
+    const ovTitle = byId('ovTitle');
+    const ovHint = byId('ovHint');
+    const tAutoRotate = byId('tAutoRotate');
+    const tInvert = byId('tInvert');
+    const tGyro = byId('tGyro');
+    const tBright = byId('tBright');
+    const tSat = byId('tSat');
+    const tCont = byId('tCont');
+    const tLangLabel = byId('tLangLabel');
+
+    function byId(id){ return document.getElementById(id); }
+
+    /* ===========================================================
+       [Three.js 렌더링 기본 세팅]
+       =========================================================== */
+    let scene, camera, renderer, sphereMesh;
+    let originalTexture = null;
+    let editedTexture = null;
+    let editCanvas, editContext;
+    let isUserInteracting = false;
+    let lon=0, lat=0, onPointerDownLon=0, onPointerDownLat=0, startX=0, startY=0;
+    const autoRotateSpeed = 0.03; // 자동회전 속도
+
+    // 터치 줌 제어용
+    let pinchStartDist = null, pinchStartFov = null;
+
+    // 자이로
+    let gyroEnabled = false, gyroHandler = null;
+
+    // 상호작용 후 자동회전 일시 정지 시간
+    const PAUSE_MS = 1000;
+    let lastInteractMs = performance.now();
+
+    /* 초기 언어 설정 */
+    let currentLang = guessLang();
+    langSelect.value = currentLang;
+    applyI18n(currentLang);
+
+    /* ===========================================================
+       [초기화 함수]
+       - Three.js 장면 구성, 이벤트 등록
+       =========================================================== */
+    init();
+    animate();
+
+    function markInteract(){ lastInteractMs = performance.now(); }
+
+    function init(){
+      // 장면 및 카메라 생성
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(75, container.clientWidth/container.clientHeight, 1, 1100);
+      camera.target = new THREE.Vector3(0,0,1);
+
+      // 렌더러 생성
+      renderer = new THREE.WebGLRenderer({ antialias:true, alpha:false, powerPreference:'high-performance', preserveDrawingBuffer:true });
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setSize(container.clientWidth, container.clientHeight);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      container.appendChild(renderer.domElement);
+
+      // 구체(내부에 텍스처 입힘)
+      const geometry = new THREE.SphereGeometry(500, 64, 40);
+      const material = new THREE.MeshBasicMaterial({ color:0xffffff, side:THREE.BackSide });
+      sphereMesh = new THREE.Mesh(geometry, material);
+      scene.add(sphereMesh);
+
+      /* ======== 마우스 조작 ======== */
+      renderer.domElement.addEventListener('contextmenu', e=>e.preventDefault());
+      renderer.domElement.addEventListener('mousedown', e=>{
+        if(e.button!==0) return;
+        isUserInteracting=true;
+        renderer.domElement.style.cursor='grabbing';
+        startX=e.clientX; startY=e.clientY;
+        onPointerDownLon=lon; onPointerDownLat=lat;
+        markInteract();
+      });
+      document.addEventListener('mousemove', e=>{
+        if(!isUserInteracting) return;
+        const s = invertDragChk.checked ? -0.1 : 0.1;
+        lon = onPointerDownLon - (e.clientX-startX)*s;
+        lat = onPointerDownLat + (e.clientY-startY)*s;
+        lat=Math.max(-85,Math.min(85,lat));
+        markInteract();
+      });
+      document.addEventListener('mouseup', ()=>{
+        isUserInteracting=false;
+        renderer.domElement.style.cursor='grab';
+        markInteract();
+      });
+
+      // 휠 줌
+      renderer.domElement.addEventListener('wheel', e=>{
+        e.preventDefault();
+        camera.fov = THREE.MathUtils.clamp(camera.fov + e.deltaY*0.03, 30, 100);
+        camera.updateProjectionMatrix();
+        markInteract();
+      }, {passive:false});
+
+      /* ======== 터치 조작 ======== */
+      renderer.domElement.addEventListener('touchstart', e=>{
+        if(e.touches.length===1){
+          e.preventDefault();
+          startX=e.touches[0].pageX;
+          startY=e.touches[0].pageY;
+          onPointerDownLon=lon;
+          onPointerDownLat=lat;
+        } else if(e.touches.length===2){
+          e.preventDefault();
+          pinchStartDist = dist(e.touches[0], e.touches[1]);
+          pinchStartFov = camera.fov;
+        }
+        markInteract();
+      }, {passive:false});
+
+      renderer.domElement.addEventListener('touchmove', e=>{
+        if(e.touches.length===1){
+          e.preventDefault();
+          const s = invertDragChk.checked ? -0.1 : 0.1;
+          const dx=e.touches[0].pageX-startX;
+          const dy=e.touches[0].pageY-startY;
+          lon = onPointerDownLon - dx*s;
+          lat = onPointerDownLat + dy*s;
+          lat=Math.max(-85,Math.min(85,lat));
+        } else if(e.touches.length===2){
+          e.preventDefault();
+          const d = dist(e.touches[0], e.touches[1]);
+          const scale = pinchStartDist? (pinchStartDist/d) : 1;
+          camera.fov = THREE.MathUtils.clamp(pinchStartFov*scale, 30, 100);
+          camera.updateProjectionMatrix();
+        }
+        markInteract();
+      }, {passive:false});
+      renderer.domElement.addEventListener('touchend', ()=>{ markInteract(); });
+
+      /* ======== 파일 드래그 & 드롭 ======== */
+      ['dragenter','dragover'].forEach(evt=>container.addEventListener(evt, e=>{e.preventDefault(); container.classList.add('drop-active');}));
+      ['dragleave','drop'].forEach(evt=>container.addEventListener(evt, e=>{e.preventDefault(); container.classList.remove('drop-active');}));
+      container.addEventListener('drop', onDrop);
+
+      /* ======== UI 버튼 ======== */
+      openFileBtn.addEventListener('click', ()=>{
+        const i=document.createElement('input');
+        i.type='file'; i.accept='.jpg,.jpeg,image/jpeg';
+        i.onchange=e=>{const f=e.target.files[0]; if(f) loadImageFile(f);};
+        i.click();
+      });
+      fullscreenBtn.addEventListener('click', ()=>{ if(!document.fullscreenElement){ container.requestFullscreen?.(); } else { document.exitFullscreen?.(); } });
+      resetBtn.addEventListener('click', ()=>{ resetView(); markInteract(); });
+      editBtn.addEventListener('click', ()=>{ if(!originalTexture){ alert(LANGS[currentLang].loadFirst); return; } togglePanel(editPanel); markInteract(); });
+      settingsBtn.addEventListener('click', ()=>{ togglePanel(settingsPanel); markInteract(); });
+      saveBtn.addEventListener('click', ()=>{ saveImage(); markInteract(); });
+
+      /* ======== 필터 슬라이더 ======== */
+      [brightnessSlider,saturationSlider,contrastSlider].forEach(sl=>{
+        sl.addEventListener('input', ()=>{ applyPreviewCSS(); syncNumericFromSlider(); markInteract(); });
+        sl.addEventListener('change', ()=>{ clearPreviewCSS(); updateImageFilters(); markInteract(); });
+      });
+      [brightnessValue,saturationValue,contrastValue].forEach(inp=>{
+        inp.addEventListener('input', ()=>{ syncSliderFromNumeric(); clearPreviewCSS(); updateImageFilters(); markInteract(); });
+      });
+
+      /* ======== 토글 및 언어 ======== */
+      autoRotateChk.addEventListener('change', ()=>{ localStorage.setItem('viewerAutoRotate', String(autoRotateChk.checked)); markInteract(); });
+      invertDragChk.addEventListener('change', ()=>{ localStorage.setItem('viewerInvert', String(invertDragChk.checked)); markInteract(); });
+      gyroCtlChk.addEventListener('change', ()=>{ onGyroToggle(); markInteract(); });
+      langSelect.addEventListener('change', ()=>{ currentLang = langSelect.value; localStorage.setItem('viewerLang', currentLang); applyI18n(currentLang); markInteract(); });
+
+      window.addEventListener('resize', onResize);
+      document.addEventListener('visibilitychange', ()=>{ markInteract(); });
+    }
+
+    /* ===============================
+       [기능 함수]
+       =============================== */
+
+    // 패널 표시/숨김
+    function togglePanel(panel){
+      const vis = panel.style.display==='block' || panel.style.display==='flex';
+      editPanel.style.display='none';
+      settingsPanel.style.display='none';
+      panel.style.display = vis ? 'none' : (panel===editPanel?'flex':'block');
+    }
+
+    // 창 리사이즈 처리
+    function onResize(){
+      camera.aspect = container.clientWidth/container.clientHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(container.clientWidth, container.clientHeight);
+    }
+
+    // 터치 거리 계산 (핀치 줌용)
+    function dist(a,b){ const dx=a.pageX-b.pageX, dy=a.pageY-b.pageY; return Math.hypot(dx,dy); }
+
+    // 드롭 이벤트 처리
+    function onDrop(e){ const f=e.dataTransfer.files[0]; if(f) loadImageFile(f); }
+
+    /* ===========================================================
+       [이미지 로드 + EXIF 방향 보정]
+       =========================================================== */
+    async function loadImageFile(file){
+      progressWrapper.style.display='block';
+      progressBar.style.width='0%';
+      progressText.textContent='0%';
+      try {
+        const arrayBuf = await readFile(file, p=>{ progressBar.style.width=p+'%'; progressText.textContent=p+'%'; });
+        let orientation = 1;
+        try {
+          const tags = ExifReader.load(arrayBuf);
+          orientation = (tags.Orientation && tags.Orientation.value) ? Number(tags.Orientation.value) : 1;
+        } catch(err){}
+        const dataUrl = await orientedDataURL(arrayBuf, orientation);
+
+        // 기존 텍스처 정리
+        if(editedTexture){ editedTexture.dispose(); editedTexture = null; }
+        if(originalTexture){ originalTexture.dispose(); originalTexture = null; }
+
+        // 로드 및 텍스처 적용
+        await new Promise((resolve, reject)=>{
+          const loader = new THREE.TextureLoader();
+          loader.load(
+            dataUrl,
+            texture=>{
+              originalTexture = texture;
+              originalTexture.colorSpace = THREE.SRGBColorSpace;
+              originalTexture.minFilter = THREE.LinearFilter;
+              originalTexture.magFilter = THREE.LinearFilter;
+              originalTexture.wrapS = THREE.RepeatWrapping;
+              originalTexture.repeat.x = -1;
+              originalTexture.offset.x = 1;
+              editCanvas = document.createElement('canvas');
+              editContext = editCanvas.getContext('2d');
+              editCanvas.width = originalTexture.image.width;
+              editCanvas.height = originalTexture.image.height;
+              resetEditControls();
+              editedTexture = null;
+              applyTexture(originalTexture);
+              dropHint.textContent = file.name;
+              dropHint.style.display='none';
+              resolve();
+            },
+            undefined, reject
+          );
+        });
+        progressBar.style.width='100%'; progressText.textContent='100%';
+      } catch(err){ console.error(err); alert(LANGS[currentLang].loadFirst); }
+      finally { setTimeout(()=> progressWrapper.style.display='none', 400); markInteract(); }
+    }
+
+    // 파일 읽기 진행 표시
+    function readFile(file,onprogress){ return new Promise((resolve,reject)=>{ const reader=new FileReader(); reader.onprogress=e=>{ if(e.lengthComputable){ const p=Math.round((e.loaded/e.total)*100); onprogress && onprogress(p);} }; reader.onload=()=>resolve(reader.result); reader.onerror=()=>reject(new Error('read error')); reader.readAsArrayBuffer(file); }); }
+
+    // EXIF 회전 보정
+    function orientedDataURL(arrayBuf, orientation){ return new Promise(resolve=>{
+      const blob = new Blob([arrayBuf], {type:'image/jpeg'});
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.onload=()=>{
+        const canvas=document.createElement('canvas');
+        const ctx=canvas.getContext('2d');
+        const w=img.naturalWidth, h=img.naturalHeight;
+        if([5,6,7,8].includes(orientation)){ canvas.width=h; canvas.height=w; } else { canvas.width=w; canvas.height=h; }
+        ctx.save();
+        switch(orientation){
+          case 2: ctx.translate(w,0); ctx.scale(-1,1); break;
+          case 3: ctx.translate(w,h); ctx.rotate(Math.PI); break;
+          case 4: ctx.translate(0,h); ctx.scale(1,-1); break;
+          case 5: ctx.rotate(0.5*Math.PI); ctx.scale(1,-1); ctx.translate(0,-h); break;
+          case 6: ctx.translate(h,0); ctx.rotate(0.5*Math.PI); break;
+          case 7: ctx.translate(h,0); ctx.rotate(0.5*Math.PI); ctx.scale(-1,1); break;
+          case 8: ctx.translate(0,w); ctx.rotate(-0.5*Math.PI); break;
+        }
+        if([5,6,7,8].includes(orientation)) ctx.drawImage(img,0,0,w,h,0,0,h,w); else ctx.drawImage(img,0,0);
+        ctx.restore();
+        const out=canvas.toDataURL('image/jpeg');
+        URL.revokeObjectURL(url);
+        resolve(out);
+      };
+      img.onerror=()=>{ URL.revokeObjectURL(url); resolve(URL.createObjectURL(blob)); };
+      img.src=url;
+    }); }
+
+    /* ===========================================================
+       [렌더링 및 자동회전]
+       =========================================================== */
+    function applyTexture(tex){ sphereMesh.material.map = tex; sphereMesh.material.needsUpdate = true; }
+
+    function animate(){ requestAnimationFrame(animate); if(document.hidden) return; update(); renderer.render(scene, camera); }
+
+    function update(){
+      const now = performance.now();
+      const canAuto = autoRotateChk.checked && (now - lastInteractMs > PAUSE_MS) && !isUserInteracting && !gyroEnabled;
+      if(canAuto){ lon += autoRotateSpeed; }
+      const phi = THREE.MathUtils.degToRad(90 - lat);
+      const theta = THREE.MathUtils.degToRad(lon);
+      const x = Math.sin(phi)*Math.cos(theta);
+      const y = Math.cos(phi);
+      const z = Math.sin(phi)*Math.sin(theta);
+      camera.lookAt(new THREE.Vector3(x,y,z));
+    }
+
+    function resetView(){ lon=0; lat=0; camera.fov=75; camera.updateProjectionMatrix(); if(originalTexture){ resetEditControls(); clearPreviewCSS(); updateImageFilters(); } }
+
+    // [-100~100] → 배율 0~2
+    function mulFromPct(p){ return (Number(p)+100)/100; }
+
+    /* ===========================================================
+       [이미지 필터 및 저장 기능]
+       =========================================================== */
+    function applyPreviewCSS(){ const b=mulFromPct(brightnessSlider.value), s=mulFromPct(saturationSlider.value), c=mulFromPct(contrastSlider.value); renderer.domElement.style.filter=`brightness(${b}) saturate(${s}) contrast(${c})`; }
+    function clearPreviewCSS(){ renderer.domElement.style.filter=''; }
+
+    function updateImageFilters(){
+      if(!originalTexture || !editCanvas) return;
+      const b=mulFromPct(brightnessSlider.value), s=mulFromPct(saturationSlider.value), c=mulFromPct(contrastSlider.value);
+      brightnessValue.value=brightnessSlider.value;
+      saturationValue.value=saturationSlider.value;
+      contrastValue.value=contrastSlider.value;
+      editContext.filter=`brightness(${b}) saturate(${s}) contrast(${c})`;
+      editContext.drawImage(originalTexture.image,0,0);
+      if(!editedTexture){
+        editedTexture=new THREE.CanvasTexture(editCanvas);
+        editedTexture.colorSpace=THREE.SRGBColorSpace;
+        editedTexture.minFilter=THREE.LinearFilter;
+        editedTexture.magFilter=THREE.LinearFilter;
+        editedTexture.wrapS=THREE.RepeatWrapping;
+        editedTexture.repeat.x=-1;
+        editedTexture.offset.x=1;
+        applyTexture(editedTexture);
+      } else { editedTexture.needsUpdate=true; }
+    }
+
+    function resetEditControls(){ brightnessSlider.value=0; saturationSlider.value=0; contrastSlider.value=0; brightnessValue.value='0'; saturationValue.value='0'; contrastValue.value='0'; }
+
+    function syncNumericFromSlider(){ brightnessValue.value=brightnessSlider.value; saturationValue.value=saturationSlider.value; contrastValue.value=contrastSlider.value; }
+    function syncSliderFromNumeric(){ brightnessSlider.value=clampPct(brightnessValue.value); saturationSlider.value=clampPct(saturationValue.value); contrastSlider.value=clampPct(contrastValue.value); }
+    function clampPct(v){ v=Number(v); if(isNaN(v)) return 0; return Math.max(-100, Math.min(100, v)); }
+
+    /* 이미지 저장 (JPG 고정) */
+    let currentProgress = 0;
+    function saveImage(){
+      if(!editCanvas){ alert(LANGS[currentLang].noImage); return; }
+      updateImageFilters();
+      displaySaveProgress(true, 0);
+      let tick = 10;
+      const interval = setInterval(()=>{ tick = Math.min(tick+5, 90); displaySaveProgress(true, tick); }, 120);
+      editCanvas.toBlob(blob=>{
+        clearInterval(interval);
+        displaySaveProgress(true, 100);
+        const a=document.createElement('a');
+        a.href=URL.createObjectURL(blob);
+        a.download=`panorama_${Date.now()}.jpg`;
+        a.click();
+        setTimeout(()=>{ URL.revokeObjectURL(a.href); displaySaveProgress(false); }, 500);
+      }, 'image/jpeg');
+    }
+
+    function displaySaveProgress(show, percent){
+      if(!show){
+        saveProgress.style.display='none';
+        currentProgress=0;
+        saveProgressBar.style.width='0%';
+        return;
+      }
+      saveProgress.style.display='block';
+      currentProgress = percent;
+      saveProgressBar.style.width = percent + '%';
+    }
+
+    /* ===========================================================
+       [자이로 제어]
+       =========================================================== */
+    function onGyroToggle(){
+      if(gyroCtlChk.checked && !gyroEnabled){
+        gyroEnabled = true;
+        gyroHandler = e=>{
+          const a=e.alpha||0, b=e.beta||0;
+          lon = a;
+          lat = THREE.MathUtils.clamp(b-90, -85, 85);
+        };
+        if(typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
+          DeviceOrientationEvent.requestPermission().then(res=>{
+            if(res==='granted'){ window.addEventListener('deviceorientation', gyroHandler); }
+            else { gyroCtlChk.checked=false; gyroEnabled=false; alert('자이로 권한이 거부되었습니다.'); }
+          });
+        } else { window.addEventListener('deviceorientation', gyroHandler); }
+      } else if(!gyroCtlChk.checked && gyroEnabled){
+        gyroEnabled=false;
+        window.removeEventListener('deviceorientation', gyroHandler);
+      }
+    }
+
+  </script>
+</body>
+</html>
